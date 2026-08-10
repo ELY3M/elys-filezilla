@@ -58,9 +58,8 @@ enum ServerProtocol
 	MAX_VALUE = CLOUDFLARE_R2
 };
 
-enum ServerType
+enum ServerType : unsigned
 {
-	DEFAULT,
 	UNIX,
 	VMS,
 	DOS, // Backslashes as preferred separator
@@ -94,7 +93,6 @@ enum class ServerFormat
 
 enum CharsetEncoding
 {
-	ENCODING_AUTO,
 	ENCODING_UTF8,
 	ENCODING_CUSTOM
 };
@@ -223,14 +221,14 @@ public:
 
 protected:
 	ServerProtocol m_protocol{UNKNOWN};
-	ServerType m_type{DEFAULT};
+	ServerType m_type{UNIX};
 	std::wstring m_host;
 	std::wstring m_user;
 	unsigned int m_port{21};
 	int m_timezoneOffset{};
 	PasvMode m_pasvMode{MODE_DEFAULT};
 	bool m_bypassProxy{};
-	CharsetEncoding m_encodingType{ENCODING_AUTO};
+	CharsetEncoding m_encodingType{ENCODING_UTF8};
 	std::wstring m_customEncoding;
 
 	std::vector<std::wstring> m_postLoginCommands;

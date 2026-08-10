@@ -41,6 +41,7 @@
 #include "splitter.h"
 #include "StatusView.h"
 #include "state.h"
+#include "timeformatting.h"
 #include "themeprovider.h"
 #include "toolbar.h"
 #include "update_dialog.h"
@@ -50,7 +51,9 @@
 #include "window_state_manager.h"
 #include "../include/version.h"
 #include "verifycertdialog.h"
+#include "verifyhostkeydialog.h"
 #include "../commonui/auto_ascii_files.h"
+#include "../commonui/hostkey_store.h"
 
 #if FZ_MANUALUPDATECHECK
 #include "overlay.h"
@@ -125,7 +128,7 @@ BEGIN_EVENT_TABLE(CMainFrame, wxNavigationEnabled<wxFrame>)
 	EVT_TIMER(wxID_ANY, CMainFrame::OnTimer)
 	EVT_TOOL(XRCID("ID_TOOLBAR_PROCESSQUEUE"), CMainFrame::OnProcessQueue)
 	EVT_TOOL(XRCID("ID_TOOLBAR_LOGVIEW"), CMainFrame::OnToggleLogView)
-	///EVT_TOOL(XRCID("ID_TOOLBAR_LOCALTREEVIEW"), CMainFrame::OnToggleDirectoryTreeView)
+	EVT_TOOL(XRCID("ID_TOOLBAR_LOCALTREEVIEW"), CMainFrame::OnToggleDirectoryTreeView)
 	EVT_TOOL(XRCID("ID_TOOLBAR_REMOTETREEVIEW"), CMainFrame::OnToggleDirectoryTreeView)
 	EVT_TOOL(XRCID("ID_TOOLBAR_QUEUEVIEW"), CMainFrame::OnToggleQueueView)
 	EVT_TOOL(XRCID("ID_TOOLBAR_FILTER"), CMainFrame::OnFilter)
@@ -356,11 +359,17 @@ CMainFrame::CMainFrame(COptions& options)
 
 	CPowerManagement::Create(this);
 
+	time_formatter_ = std::make_unique<TimeFormatter>(options_);
+	login_manager_ = std::make_unique<CLoginManager>();
+	cert_store_ = std::make_unique<CertStore>(options_.get_int(OPTION_DEFAULT_KIOSKMODE) == 2);
+	keyfilePasswordManager_ = std::make_unique<KeyfilePasswordManager>();
+	hostkeyStore_ = std::make_unique<CVerifyHostkeyDialog>(options_);
+
 	// It's important that the context control gets created before our own state handler
 	// so that contextchange events can be processed in the right order.
 	m_pContextControl = new CContextControl(*this);
 
-	m_pStatusBar = new CStatusBar(this, m_engineContext.GetActivityLogger(), options_);
+	m_pStatusBar = new CStatusBar(this, m_engineContext.GetActivityLogger(), options_, *time_formatter_);
 	if (m_pStatusBar) {
 		SetStatusBar(m_pStatusBar);
 	}
@@ -379,9 +388,7 @@ CMainFrame::CMainFrame(COptions& options)
 		CreateQuickconnectBar();
 	}
 
-	cert_store_ = std::make_unique<CertStore>(options_.get_int(OPTION_DEFAULT_KIOSKMODE) == 2);
-	async_request_queue_ = std::make_unique<CAsyncRequestQueue>(this, options_, *cert_store_);
-
+	async_request_queue_ = std::make_unique<CAsyncRequestQueue>(this, options_, *time_formatter_, *login_manager_, *cert_store_, *keyfilePasswordManager_, *hostkeyStore_);
 	edit_handler_ = std::make_unique<CEditHandler>(options_);
 
 #ifdef __WXMSW__
@@ -405,7 +412,7 @@ CMainFrame::CMainFrame(COptions& options)
 	m_pQueueLogSplitter = new CSplitterWindowEx(m_pBottomSplitter, -1, wxDefaultPosition, wxDefaultSize, wxSP_NOBORDER | wxSP_LIVE_UPDATE);
 	m_pQueueLogSplitter->SetMinimumPaneSize(50, 250);
 	m_pQueueLogSplitter->SetSashGravity(0.5);
-	m_pQueuePane = new CQueue(m_pQueueLogSplitter, this, async_request_queue_.get(), *cert_store_);
+	m_pQueuePane = new CQueue(m_pQueueLogSplitter, this, async_request_queue_.get(), *login_manager_, *cert_store_);
 
 	if (message_log_position == 1) {
 		m_pStatusView = new CStatusView(m_pQueueLogSplitter, options_);
@@ -651,11 +658,9 @@ void CMainFrame::OnMenuHandler(wxCommandEvent &event)
 	else if (id == XRCID("ID_VIEW_MESSAGELOG")) {
 		OnToggleLogView(event);
 	}
-	/*
 	else if (id == XRCID("ID_VIEW_LOCALTREE")) {
 		OnToggleDirectoryTreeView(event);
 	}
-	*/
 	else if (id == XRCID("ID_VIEW_REMOTETREE")) {
 		OnToggleDirectoryTreeView(event);
 	}
@@ -813,12 +818,12 @@ void CMainFrame::OnMenuHandler(wxCommandEvent &event)
 		}
 	}
 	else if (id == XRCID("ID_EXPORT")) {
-		CExportDialog dlg(this, m_pQueueView);
-		dlg.Run();
+		CExportDialog dlg(this);
+		dlg.Run(options_, m_pQueueView);
 	}
 	else if (id == XRCID("ID_IMPORT")) {
 		CImportDialog dlg(this, m_pQueueView);
-		dlg.Run(options_);
+		dlg.Run(options_, *login_manager_);
 	}
 	else if (id == XRCID("ID_MENU_FILE_EDITED")) {
 		CEditHandlerStatusDialog dlg(this, options_, edit_handler_.get());
@@ -883,7 +888,6 @@ void CMainFrame::OnMenuHandler(wxCommandEvent &event)
 		bool show = options_.get_int(OPTION_FILELIST_STATUSBAR) == 0;
 		options_.set(OPTION_FILELIST_STATUSBAR, show ? 1 : 0);
 		CContextControl::_context_controls* controls = m_pContextControl ? m_pContextControl->GetCurrentControls() : 0;
-		/*
 		if (controls && controls->pLocalListViewPanel) {
 			auto* pStatusBar = controls->pLocalListViewPanel->GetStatusBar();
 			if (pStatusBar) {
@@ -892,7 +896,6 @@ void CMainFrame::OnMenuHandler(wxCommandEvent &event)
 				controls->pLocalListViewPanel->ProcessWindowEvent(evt);
 			}
 		}
-		*/
 		if (controls && controls->pRemoteListViewPanel) {
 			auto* pStatusBar = controls->pRemoteListViewPanel->GetStatusBar();
 			if (pStatusBar) {
@@ -940,11 +943,11 @@ void CMainFrame::OnMenuHandler(wxCommandEvent &event)
 		// controls->last_bookmark_path can get modified if it's empty now
 		int res;
 		if (id == XRCID("ID_BOOKMARK_ADD")) {
-			CNewBookmarkDialog dlg(this, options_, sitePath, old_site ? &old_site : 0);
+			CNewBookmarkDialog dlg(this, options_, *login_manager_, sitePath, old_site ? &old_site : 0);
 			res = dlg.Run(pState->GetLocalDir().GetPath(), pState->GetRemotePath());
 		}
 		else {
-			CBookmarksDialog dlg(this, options_, sitePath, old_site ? &old_site : 0);
+			CBookmarksDialog dlg(this, options_, *login_manager_, sitePath, old_site ? &old_site : 0);
 			res = dlg.Run();
 		}
 		if (res == wxID_OK) {
@@ -1084,7 +1087,7 @@ void CMainFrame::OnEngineEvent(CFileZillaEngine* engine)
 				}
 				else {
 					if (pAsyncRequest->GetRequestID() == reqId_certificate) {
-						pState->SetSecurityInfo(static_cast<CCertificateNotification&>(*pAsyncRequest));
+						pState->SetTlsSessionInfo(static_cast<CCertificateNotification&>(*pAsyncRequest).info_);
 					}
 					if (async_request_queue_) {
 						async_request_queue_->AddRequest(pState->engine_.get(), std::move(pAsyncRequest));
@@ -1099,17 +1102,16 @@ void CMainFrame::OnEngineEvent(CFileZillaEngine* engine)
 			break;
 		case nId_sftp_encryption:
 			{
-				pState->SetSecurityInfo(static_cast<CSftpEncryptionNotification&>(*pNotification));
+				auto & info = static_cast<CSftpEncryptionNotification&>(*pNotification);
+				pState->SetSshSessionInfo(info.algorithms_, info.hostkey_fingerprint_);
 			}
 			break;
-		/*	
 		case nId_local_dir_created:
 			if (pState) {
 				auto const& localDirCreatedNotification = static_cast<CLocalDirCreatedNotification const&>(*pNotification.get());
 				pState->LocalDirCreated(localDirCreatedNotification.dir);
 			}
 			break;
-			*/
 		case nId_serverchange:
 			if (pState) {
 				auto const& notification = static_cast<ServerChangeNotification const&>(*pNotification.get());
@@ -1410,13 +1412,11 @@ void CMainFrame::OnClose(wxCloseEvent &event)
 	if (m_pContextControl) {
 		CContextControl::_context_controls* controls = m_pContextControl->GetCurrentControls();
 		if (controls) {
-			
 			if (controls->pLocalListView) {
-				controls->pLocalListView->SaveColumnSettings(OPTION_LOCALFILELIST_COLUMN_WIDTHS, OPTION_LOCALFILELIST_COLUMN_SHOWN, OPTION_LOCALFILELIST_COLUMN_ORDER);
+				controls->pLocalListView->SaveColumnSettings(options_, OPTION_LOCALFILELIST_COLUMN_WIDTHS, OPTION_LOCALFILELIST_COLUMN_SHOWN, OPTION_LOCALFILELIST_COLUMN_ORDER);
 			}
-			
 			if (controls->pRemoteListView) {
-				controls->pRemoteListView->SaveColumnSettings(OPTION_REMOTEFILELIST_COLUMN_WIDTHS, OPTION_REMOTEFILELIST_COLUMN_SHOWN, OPTION_REMOTEFILELIST_COLUMN_ORDER);
+				controls->pRemoteListView->SaveColumnSettings(options_, OPTION_REMOTEFILELIST_COLUMN_WIDTHS, OPTION_REMOTEFILELIST_COLUMN_SHOWN, OPTION_REMOTEFILELIST_COLUMN_ORDER);
 			}
 		}
 
@@ -1505,7 +1505,7 @@ void CMainFrame::OpenSiteManager(Site const* site)
 		return;
 	}
 
-	CSiteManagerDialog dlg(options_);
+	CSiteManagerDialog dlg(options_, *login_manager_);
 
 	std::vector<CSiteManagerDialog::_connected_site> connected_sites;
 
@@ -1594,7 +1594,7 @@ void CMainFrame::OnProcessQueue(wxCommandEvent& event)
 
 void CMainFrame::OnMenuEditSettings(wxCommandEvent&)
 {
-	CSettingsDialog dlg(options_, m_engineContext);
+	CSettingsDialog dlg(options_, *login_manager_, m_engineContext);
 	if (!dlg.Create(this)) {
 		return;
 	}
@@ -1699,7 +1699,6 @@ void CMainFrame::ShowDirectoryTree(bool local, bool show)
 		if (!controls) {
 			continue;
 		}
-
 
 		CSplitterWindowEx* splitter = local ? controls->pLocalSplitter : controls->pRemoteSplitter;
 		CView* tree = local ? controls->pLocalTreeViewPanel : controls->pRemoteTreeViewPanel;
@@ -1889,7 +1888,6 @@ void CMainFrame::UpdateLayout()
 {
 	int const layout = options_.get_int(OPTION_FILEPANE_LAYOUT);
 	int const swap = options_.get_int(OPTION_FILEPANE_SWAP);
-	int const hidelocalpane = options_.get_int(OPTION_LOCALPANE_HIDE);
 
 	int const messagelog_position = options_.get_int(OPTION_MESSAGELOG_POSITION);
 
@@ -1970,11 +1968,6 @@ void CMainFrame::UpdateLayout()
 		int isMode = controls->pViewSplitter->GetSplitMode();
 
 		int isSwap = controls->pViewSplitter->GetWindow1() == controls->pRemoteSplitter ? 1 : 0;
-		
-		if (hidelocalpane)) {	
-		controls->pLocalSplitter->UnSplit();
-		controls->pLocalSplitter->Hide();
-		}		
 
 		if (mode != isMode || swap != isSwap) {
 			controls->pViewSplitter->Unsplit();
@@ -2071,8 +2064,6 @@ void CMainFrame::UpdateLayout()
 			controls->pRemoteSplitter->SetSashGravity(0.0);
 		}
 	}
-	
-	
 }
 
 void CMainFrame::OnSitemanagerDropdown(wxCommandEvent& event)
@@ -2090,7 +2081,7 @@ void CMainFrame::OnSitemanagerDropdown(wxCommandEvent& event)
 bool CMainFrame::ConnectToSite(Site & data, Bookmark const& bookmark, CState* pState)
 {
 	// First check if we need to ask user for a password
-	if (!CLoginManager::Get().GetPassword(data, false)) {
+	if (!login_manager_ || !login_manager_->GetPassword(data, false)) {
 		return false;
 	}
 
@@ -2665,7 +2656,7 @@ void CMainFrame::ProcessCommandLine()
 
 		if (options_.get_int(OPTION_DEFAULT_KIOSKMODE) && site.credentials.logonType_ == LogonType::normal) {
 			site.SetLogonType(LogonType::ask);
-			CLoginManager::Get().RememberPassword(site);
+			login_manager_->RememberPassword(site);
 		}
 
 		Bookmark bm;
@@ -2827,7 +2818,7 @@ void CMainFrame::OnSearch(wxCommandEvent&)
 		return;
 	}
 
-	CSearchDialog dlg(this, *pState, m_pQueueView, options_, edit_handler_.get());
+	CSearchDialog dlg(this, *pState, m_pQueueView, options_, *time_formatter_, edit_handler_.get());
 	if (!dlg.Load()) {
 		return;
 	}

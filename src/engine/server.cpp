@@ -64,7 +64,6 @@ static std::vector<ServerProtocol> const defaultProtocols = {
 };
 
 static char const* const typeNames[SERVERTYPE_MAX] = {
-	fztranslate_mark("Default (Autodetect)"),
 	"Unix",
 	"VMS",
 	"DOS with backslash separators",
@@ -251,7 +250,7 @@ bool CServer::operator!=(const CServer &op) const
 CServer::CServer(ServerProtocol protocol, ServerType type, std::wstring const& host, unsigned int port)
 {
 	m_protocol = protocol;
-	m_type = type;
+	m_type = HasFeature(ProtocolFeature::ServerType) ? type : UNIX;
 	m_host = host;
 	if (port) {
 		m_port = port;
@@ -263,22 +262,28 @@ CServer::CServer(ServerProtocol protocol, ServerType type, std::wstring const& h
 
 void CServer::SetType(ServerType type)
 {
-	m_type = type;
+	if (HasFeature(ProtocolFeature::ServerType)) {
+		m_type = type;
+	}
 }
 
 void CServer::SetProtocol(ServerProtocol serverProtocol)
 {
 	assert(serverProtocol != UNKNOWN);
 
-	if (!ProtocolHasFeature(serverProtocol, ProtocolFeature::PostLoginCommands)) {
+	m_protocol = serverProtocol;
+
+	if (!HasFeature(ProtocolFeature::PostLoginCommands)) {
 		m_postLoginCommands.clear();
 	}
-
-	m_protocol = serverProtocol;
 
 	// Clear out parameters not supported by the current protocol
 	if (!ProtocolHasUser(serverProtocol)) {
 		m_user.clear();
+	}
+
+	if (!HasFeature(ProtocolFeature::ServerType)) {
+		m_type = UNIX;
 	}
 
 	std::map<std::string, std::wstring, std::less<>> oldParams;
@@ -584,6 +589,10 @@ bool CServer::ProtocolHasFeature(ServerProtocol const protocol, ProtocolFeature 
 		}
 		break;
 	case ProtocolFeature::ServerType:
+		if (protocol == FTP || protocol == FTPS || protocol == FTPES || protocol == INSECURE_FTP) {
+			return true;
+		}
+		break;
 	case ProtocolFeature::UnixChmod:
 		if (protocol == FTP || protocol == FTPS || protocol == FTPES || protocol == INSECURE_FTP ||
 			protocol == SFTP) {
@@ -663,7 +672,9 @@ bool CServer::ProtocolHasFeature(ServerProtocol const protocol, ProtocolFeature 
 
 std::wstring CServer::GetNameFromServerType(ServerType type)
 {
-	assert(type != SERVERTYPE_MAX);
+	if (type >= SERVERTYPE_MAX) {
+		return {};
+	}
 	return fz::translate(typeNames[type]);
 }
 
@@ -676,7 +687,7 @@ ServerType CServer::GetServerTypeFromName(std::wstring const& name)
 		}
 	}
 
-	return DEFAULT;
+	return UNIX;
 }
 
 void CServer::ClearExtraParameters()
@@ -930,10 +941,23 @@ std::vector<ParameterTraits> const& ExtraServerParameterTraits(ServerProtocol pr
 	switch (protocol) {
 	case FTP:
 	case FTPS:
+	case FTPES:
+	case INSECURE_FTP:
 		{
 			static std::vector<ParameterTraits> const ret = []() {
 				std::vector<ParameterTraits> ret;
 				ret.emplace_back(ParameterTraits{"otp_code", ParameterSection::credentials, ParameterTraits::optional | ParameterTraits::custom, std::wstring(), std::wstring()});
+				return ret;
+			}();
+			return ret;
+		}
+	case SFTP:
+		{
+			static std::vector<ParameterTraits> const ret = []() {
+				std::vector<ParameterTraits> ret;
+				ret.emplace_back(ParameterTraits{"allow_non_crlf_identification_string", ParameterSection::extra, ParameterTraits::optional | ParameterTraits::custom | ParameterTraits::content_transparent, std::wstring(), std::wstring()});
+				ret.emplace_back(ParameterTraits{"allow_agent_keys_of_unknown_type", ParameterSection::extra, ParameterTraits::optional | ParameterTraits::custom | ParameterTraits::content_transparent, std::wstring(), std::wstring()});
+				ret.emplace_back(ParameterTraits{"ignore_unknown_flags_in_attributes", ParameterSection::extra, ParameterTraits::optional | ParameterTraits::custom, std::wstring(), std::wstring()});
 				return ret;
 			}();
 			return ret;

@@ -34,12 +34,7 @@ CFtpLogonOpData::CFtpLogonOpData(CFtpControlSocket& controlSocket)
 	}
 
 	const CharsetEncoding encoding = currentServer_.GetEncodingType();
-	if (encoding == ENCODING_AUTO && CServerCapabilities::GetCapability(currentServer_, utf8_command) != no) {
-		controlSocket_.m_useUTF8 = true;
-	}
-	else if (encoding == ENCODING_UTF8) {
-		controlSocket_.m_useUTF8 = true;
-	}
+	controlSocket_.m_useUTF8 = encoding == ENCODING_UTF8;
 }
 
 int CFtpLogonOpData::Send()
@@ -158,7 +153,7 @@ int CFtpLogonOpData::Send()
 				}
 
 				if (challengeMode_) {
-					challenge.clear();
+					challenge_.clear();
 				}
 
 				if (cmd.command.empty()) {
@@ -169,13 +164,18 @@ int CFtpLogonOpData::Send()
 					return controlSocket_.SendCommand(cmd.command);
 				}
 			case loginCommandType::pass:
-				if (!challenge.empty()) {
-					auto type = otp_ ? CInteractiveLoginNotification::totp : CInteractiveLoginNotification::interactive;
-					auto notification = std::make_unique<CInteractiveLoginNotification>(type, challenge, false);
-					notification->server = currentServer_;
+				if (otp_ && !controlSocket_.credentials_.HasExtraParameter("otp_code")) {
+					controlSocket_.SendAsyncRequest(std::make_unique<OtpRequest>(currentServer_, controlSocket_.handle_));
+					return FZ_REPLY_WOULDBLOCK;
+				}
+				else if (!challenge_.empty()) {
+					auto notification = std::make_unique<CInteractiveLoginNotification>(currentServer_, controlSocket_.handle_);
+
+					notification->instruction_ = fz::to_utf8(challenge_);
+					notification->prompts_.emplace_back(fz::ssh::keyboard_interactive_prompt{fz::to_utf8(_("Password")), false});
+					notification->server_ = currentServer_;
 					notification->handle_ = controlSocket_.handle_;
-					notification->credentials = controlSocket_.credentials_;
-					challenge.clear();
+					challenge_.clear();
 
 					controlSocket_.SendAsyncRequest(std::move(notification));
 
@@ -317,24 +317,25 @@ int CFtpLogonOpData::ParseResponse()
 		if (cmd.type == loginCommandType::user) {
 			if (code == 3 && response.substr(0, 3) == L"336"sv) {
 				if (controlSocket_.tls_layer_ && controlSocket_.tls_layer_->get_alpn() == "x-filezilla-ftp"sv) {
-					size_t beg = challenge.rfind('[');
-					size_t end = challenge.rfind(']');
+					size_t beg = challenge_.rfind('[');
+					size_t end = challenge_.rfind(']');
 					if (beg != std::string::npos && end != std::string::npos && beg < end) {
-						auto tokens = fz::strtok_view(std::wstring_view(challenge).substr(beg + 1, end - beg - 1), ',');
+						auto tokens = fz::strtok_view(std::wstring_view(challenge_).substr(beg + 1, end - beg - 1), ',');
 						if (tokens.size() == 1 && tokens[0] == L"alg:totp"sv) {
 							otp_ = true;
+							challenge_.clear();
 						}
 					}
 				}
 				else {
 					if (challengeMode_ != always) {
 						log(logmsg::status, _("Consider using the interactive login type."));
-						challenge.clear();
+						challenge_.clear();
 					}
 				}
 			}
 			else if (challengeMode_ != always) {
-				challenge.clear();
+				challenge_.clear();
 			}
 		}
 
@@ -347,41 +348,6 @@ int CFtpLogonOpData::ParseResponse()
 				auto const pw = controlSocket_.credentials_.GetPass();
 				if (!pw.empty() && (pw.front() == ' ' || pw.back() == ' ')) {
 					log(logmsg::status, _("Check your login credentials. The entered password starts or ends with a space character."));
-				}
-			}
-
-			if (currentServer_.GetEncodingType() == ENCODING_AUTO && controlSocket_.m_useUTF8) {
-				// Fall back to local charset for the case that the server might not
-				// support UTF8 and the login data contains non-ascii characters.
-				bool asciiOnly = true;
-				if (!fz::str_is_ascii(currentServer_.GetUser())) {
-					asciiOnly = false;
-				}
-				if (!fz::str_is_ascii(controlSocket_.credentials_.GetPass())) {
-					asciiOnly = false;
-				}
-				if (!fz::str_is_ascii(controlSocket_.credentials_.account_)) {
-					asciiOnly = false;
-				}
-				if (!asciiOnly) {
-					if (ftp_proxy_type_) {
-						log(logmsg::status, _("Login data contains non-ASCII characters and server might not be UTF-8 aware. Cannot fall back to local charset since using proxy."));
-						int error = FZ_REPLY_DISCONNECTED | FZ_REPLY_ERROR;
-						if (cmd.type == loginCommandType::pass && code == 5) {
-							error |= FZ_REPLY_PASSWORDFAILED;
-						}
-						return error;
-					}
-					log(logmsg::status, _("Login data contains non-ASCII characters and server might not be UTF-8 aware. Trying local charset."));
-					controlSocket_.m_useUTF8 = false;
-					if (!PrepareLoginSequence()) {
-						int error = FZ_REPLY_DISCONNECTED | FZ_REPLY_ERROR;
-						if (cmd.type == loginCommandType::pass && code == 5) {
-							error |= FZ_REPLY_PASSWORDFAILED;
-						}
-						return error;
-					}
-					return FZ_REPLY_CONTINUE;
 				}
 			}
 
@@ -420,20 +386,6 @@ int CFtpLogonOpData::ParseResponse()
 			CServerCapabilities::SetCapability(currentServer_, syst_command, no);
 		}
 
-		if (currentServer_.GetType() == DEFAULT && code == 2) {
-			if (response.size() > 7 && response.substr(3, 4) == L" MVS") {
-				currentServer_.SetType(MVS);
-			}
-			else if (response.size() > 12 && fz::str_toupper_ascii(response.substr(3, 9)) == L" NONSTOP ") {
-				currentServer_.SetType(HPNONSTOP);
-			}
-
-			if (!controlSocket_.m_MultilineResponseLines.empty() && fz::str_tolower_ascii(controlSocket_.m_MultilineResponseLines.front().substr(4, 4)) == L"z/vm") {
-				CServerCapabilities::SetCapability(currentServer_, syst_command, yes, controlSocket_.m_MultilineResponseLines.front().substr(4) + L" " + response.substr(4));
-				currentServer_.SetType(ZVM);
-			}
-		}
-
 		if (response.find(L"FileZilla") != std::wstring::npos) {
 			neededCommands[LOGON_CLNT] = 0;
 			neededCommands[LOGON_OPTSUTF8] = 0;
@@ -458,9 +410,13 @@ int CFtpLogonOpData::ParseResponse()
 		}
 
 		const CharsetEncoding encoding = currentServer_.GetEncodingType();
-		if (encoding == ENCODING_AUTO && CServerCapabilities::GetCapability(currentServer_, utf8_command) != yes) {
+		if (encoding == ENCODING_UTF8 && CServerCapabilities::GetCapability(currentServer_, utf8_command) != yes) {
 			log(logmsg::status, _("Server does not support non-ASCII characters."));
-			controlSocket_.m_useUTF8 = false;
+		}
+
+		if (CServerCapabilities::GetCapability(currentServer_, tvfs_support) == yes && currentServer_.GetType() != ServerType::UNIX) {
+			log(logmsg::error, _("The configured server type %s cannot be used on a server that identifies itself of type %s (via TVFS support)"), CServer::GetNameFromServerType(currentServer_.GetType()), CServer::GetNameFromServerType(UNIX));
+			return FZ_REPLY_CRITICALERROR;
 		}
 	}
 	else if (opState == LOGON_PROT) {
@@ -494,18 +450,6 @@ int CFtpLogonOpData::ParseResponse()
 				break;
 			}
 			else if (cap == yes) {
-				if (currentServer_.GetType() == DEFAULT) {
-					if (system.substr(0, 3) == L"MVS") {
-						currentServer_.SetType(MVS);
-					}
-					else if (fz::str_toupper_ascii(system.substr(0, 4)) == L"Z/VM") {
-						currentServer_.SetType(ZVM);
-					}
-					else if (fz::str_toupper_ascii(system.substr(0, 8)) == L"NONSTOP ") {
-						currentServer_.SetType(HPNONSTOP);
-					}
-				}
-
 				if (system.find(L"FileZilla") != std::wstring::npos) {
 					neededCommands[LOGON_CLNT] = 0;
 					neededCommands[LOGON_OPTSUTF8] = 0;
@@ -518,9 +462,8 @@ int CFtpLogonOpData::ParseResponse()
 				break;
 			}
 			const CharsetEncoding encoding = currentServer_.GetEncodingType();
-			if (encoding == ENCODING_AUTO && CServerCapabilities::GetCapability(currentServer_, utf8_command) != yes) {
+			if (encoding == ENCODING_UTF8 && CServerCapabilities::GetCapability(currentServer_, utf8_command) != yes) {
 				log(logmsg::status, _("Server does not support non-ASCII characters."));
-				controlSocket_.m_useUTF8 = false;
 			}
 		}
 		else if (opState == LOGON_CLNT) {

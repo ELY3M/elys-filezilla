@@ -3,7 +3,7 @@
 
 /* This class is responsible for parsing the directory listings returned by
  * the server.
- * Unfortunatly, RFC959 did not specify the format of directory listings, so
+ * Unfortunately, RFC959 did not specify the format of directory listings, so
  * each server uses its own format. In addition to that, in most cases the
  * listings were not designed to be machine-parsable, they were meant to be
  * human readable by users of that particular server.
@@ -19,7 +19,7 @@
  *
  * Some servers send MVS style listings which can consist of just the
  * filename without any additional data. In order to prevent problems, this
- * format is only parsed if the server is in fact recognizes as MVS server.
+ * format is only parsed if the server is in fact recognized as MVS server.
  *
  * Please see tests/dirparsertest.cpp for a list of supported formats and the
  * expected parser result.
@@ -28,14 +28,18 @@
  * which then are processed further. Each line gets consecutively tested for
  * different formats, starting with the most common Unix style format.
  * Lines not containing a recognized format (e.g. a part of a multiline
- * entry) are rememberd and if the next line cannot be parsed either, they
+ * entry) are remembered and if the next line cannot be parsed either, they
  * get concatenated to be parsed again (and discarded if not recognized).
  */
 
 #include "../include/directorylisting.h"
 #include "../include/server.h"
 
-#include <deque>
+#include <libfilezilla/buffer.hpp>
+
+#include <limits>
+#include <optional>
+#include <string>
 #include <vector>
 
 class CLine;
@@ -53,6 +57,92 @@ namespace listingEncoding
 }
 
 
+class CToken final
+{
+protected:
+	enum flags : unsigned char {
+		numeric_left = 0x01,
+		non_numeric_left = 0x02,
+		numeric_right = 0x04,
+		non_numeric_right = 0x08,
+		numeric  = 0x10,
+		non_numeric = 0x20
+	};
+
+
+public:
+	CToken() = default;
+
+	enum t_numberBase {
+		decimal,
+		hex
+	};
+
+	CToken(std::wstring_view data)
+		: data_(data)
+	{}
+
+	CToken(wchar_t const* data, size_t len)
+		: data_(data, len)
+	{}
+
+	wchar_t const* data() const {
+		return data_.data();
+	}
+
+	size_t size() const {
+		return data_.size();
+	}
+
+	explicit operator bool() const { return !data_.empty(); }
+
+	wchar_t operator[](size_t i) const { return data_[i]; }
+
+	std::wstring_view get_view() const { return data_; }
+
+	bool IsNumeric(t_numberBase base = decimal);
+	bool IsNumeric(size_t start, size_t len);
+	bool IsLeftNumeric();
+	bool IsRightNumeric();
+
+	int Find(wchar_t const* chr, size_t start = 0) const;
+	int Find(wchar_t chr, size_t start = 0) const;
+
+	int64_t GetNumber(size_t start, int len);
+	int64_t GetNumber(t_numberBase base = decimal);
+
+	static int64_t GetNumber(std::wstring_view s, t_numberBase base = decimal, bool trailingDataIsError = false);
+
+protected:
+	int64_t m_number{std::numeric_limits<int64_t>::min()};
+
+	std::wstring_view data_;
+	unsigned char flags_{};
+};
+
+class CLine final
+{
+public:
+	CLine() = default;
+
+	explicit CLine(std::wstring_view const& line, size_t trailing_whitespace = std::wstring::npos);
+
+	CLine(CLine&&) noexcept = default;
+	CLine& operator=(CLine&&) noexcept = default;
+
+	CToken GetToken(unsigned int n);
+	CToken GetEndToken(unsigned int n, bool include_whitespace = false);
+
+	size_t TrailingWhitespace() const { return trailing_whitespace_; }
+
+protected:
+	std::vector<CToken> m_Tokens;
+	std::wstring_view line_;
+	size_t m_parsePos{};
+	size_t trailing_whitespace_{std::wstring::npos};
+};
+
+
 class FZC_PUBLIC_SYMBOL CDirectoryListingParser final
 {
 public:
@@ -64,17 +154,21 @@ public:
 
 	CDirectoryListing Parse(const CServerPath &path);
 
-	bool AddData(char *pData, int len);
-	bool AddLine(std::wstring && line, std::wstring && name, fz::datetime const& time);
+	fz::buffer& GetInputBuffer() { return inbuf_; }
+	bool ProcessAddedData();
+
+	bool AddLine(std::wstring && line, std::wstring && name, fz::datetime const& time, std::optional<uint64_t> const& size, std::optional<int> flags);
 
 	void Reset();
 
+	// This is the auto-deduced offset for listing formats that don't mandate use of UTC
 	void SetTimezoneOffset(fz::duration const& span) { m_timezoneOffset = span; }
 
 	void SetServer(const CServer& server) { m_server = server; };
 
 protected:
-	CLine *GetLine(bool breakAtEnd, bool& error);
+	std::wstring GetLine(bool breakAtEnd, bool& error);
+	void TrimLeadingWhitespace();
 
 	bool ParseData(bool partial);
 
@@ -111,33 +205,20 @@ protected:
 	// Parse file sizes given like this: 123.4M
 	bool ParseComplexFileSize(CToken& token, int64_t& size, int blocksize = -1);
 
-	bool GetMonthFromName(std::wstring const& name, int &month);
+	bool GetMonthFromName(std::wstring_view const& name, int &month);
 
 	void DeduceEncoding();
-	void ConvertEncoding(char *pData, int len);
+	void ConvertEncoding();
 
 	CControlSocket* m_pControlSocket;
 
-	static std::map<std::wstring, int> m_MonthNamesMap;
+	fz::buffer inbuf_;
+	size_t parse_offset_{};
+	size_t converted_{};
 
-	struct t_list
-	{
-		t_list() = default;
-		t_list(char* s, int l)
-			: p(s), len(l)
-		{}
-
-		char *p;
-		int len;
-	};
-
-	int m_currentOffset{};
-
-	std::deque<t_list> m_DataList;
 	std::vector<fz::shared_value<CDirentry>> entries_;
-	int64_t m_totalData{};
 
-	CLine *m_prevLine{};
+	std::wstring prevLine_;
 
 	CServer m_server;
 

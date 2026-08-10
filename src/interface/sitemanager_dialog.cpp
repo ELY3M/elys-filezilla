@@ -246,8 +246,9 @@ protected:
 	CSiteManagerDialog* m_pSiteManager;
 };
 
-CSiteManagerDialog::CSiteManagerDialog(COptionsBase & options)
+CSiteManagerDialog::CSiteManagerDialog(COptionsBase & options, login_manager & lim)
 	: options_(options)
+	, login_manager_(lim)
 {
 }
 
@@ -850,7 +851,7 @@ bool CSiteManagerDialog::SaveChild(pugi::xml_node element, wxTreeItemId child)
 			CSiteManager::UpdateGoogleDrivePath(data->m_site->m_default_bookmark.m_remoteDir);
 		}
 
-		CSiteManager::Save(node, *data->m_site, CLoginManager::Get(), options_);
+		CSiteManager::Save(node, *data->m_site, login_manager_, options_);
 
 		if (data->connected_item != -1) {
 			(*m_connected_sites)[data->connected_item].site = *data->m_site;
@@ -928,7 +929,7 @@ bool CSiteManagerDialog::Verify()
 			if (!remotePath.SetPath(remotePathRaw.ToStdWstring())) {
 				XRCCTRL(*this, "ID_BOOKMARK_REMOTEDIR", wxTextCtrl)->SetFocus();
 				wxString msg;
-				if (pServer->m_site->server.GetType() != DEFAULT) {
+				if (pServer->m_site->server.GetType() != UNIX) {
 					msg = wxString::Format(_("Remote path cannot be parsed. Make sure it is a valid absolute path and is supported by the servertype (%s) selected on the parent site."), CServer::GetNameFromServerType(pServer->m_site->server.GetType()));
 				}
 				else {

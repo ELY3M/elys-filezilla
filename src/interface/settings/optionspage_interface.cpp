@@ -162,7 +162,7 @@ bool COptionsPageInterface::LoadPage()
 	m_pOwner->RememberOldValue(OPTION_FILEPANE_SWAP);
 	m_pOwner->RememberOldValue(OPTION_LOCALPANE_HIDE);
 
-	impl_->ropListRefresh_->SetValue(m_pOptions->get_bool(OPTION_REMOTE_ROP_LISTING_REFFRESH));
+	impl_->ropListRefresh_->SetValue(m_pOptions->get_bool(OPTION_REMOTE_ROP_LISTING_REFRESH));
 
 	return true;
 }
@@ -201,7 +201,7 @@ bool COptionsPageInterface::SavePage()
 		action += 1;
 	}
 	m_pOptions->set(OPTION_ALREADYCONNECTED_CHOICE, action);
-	m_pOptions->set(OPTION_REMOTE_ROP_LISTING_REFFRESH, impl_->ropListRefresh_->GetValue());
+	m_pOptions->set(OPTION_REMOTE_ROP_LISTING_REFRESH, impl_->ropListRefresh_->GetValue());
 
 	return true;
 }

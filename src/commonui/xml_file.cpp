@@ -399,12 +399,30 @@ bool GetServer(pugi::xml_node node, Site & site)
 	}
 	site.server.SetProtocol(static_cast<ServerProtocol>(protocol));
 
-	int type = GetTextElementInt(node, "Type");
-	if (type < 0 || type >= SERVERTYPE_MAX) {
-		return false;
+	if (site.server.HasFeature(ProtocolFeature::ServerType)) {
+		int type = GetTextElementInt(node, "Type");
+		if (type < 0 || static_cast<unsigned int>(type) > SERVERTYPE_MAX) {
+			return false;
+		}
+		if (type) {
+			--type;
+		}
+		else {
+			// See if we can recover type from a stored remote path
+			std::wstring p = GetTextElement(node, "RemoteDir");
+			if (p.empty()) {
+				p = GetTextElement(node, "RemotePath");
+			}
+			size_t pos = p.find(' ');
+			if (pos != std::string::npos) {
+				auto v = fz::to_integral<unsigned int>(p.substr(0, pos));
+				if (v > 0 && v <= SERVERTYPE_MAX) {
+					type = --v;
+				}
+			}
+		}
+		site.server.SetType(static_cast<ServerType>(type));
 	}
-
-	site.server.SetType(static_cast<ServerType>(type));
 
 	int logonType = GetTextElementInt(node, "Logontype");
 	if (logonType < 0 || logonType >= static_cast<int>(LogonType::count)) {
@@ -494,10 +512,7 @@ bool GetServer(pugi::xml_node node, Site & site)
 	site.connection_limit_ = static_cast<unsigned int>(maximumMultipleConnections);
 
 	std::string_view encodingType = node.child_value("EncodingType");
-	if (encodingType == "UTF-8") {
-		site.server.SetEncodingType(ENCODING_UTF8);
-	}
-	else if (encodingType == "Custom") {
+	if (encodingType == "Custom") {
 		std::wstring customEncoding = GetTextElement(node, "CustomEncoding");
 		if (customEncoding.empty()) {
 			return false;
@@ -507,7 +522,7 @@ bool GetServer(pugi::xml_node node, Site & site)
 		}
 	}
 	else {
-		site.server.SetEncodingType(ENCODING_AUTO);
+		site.server.SetEncodingType(ENCODING_UTF8);
 	}
 
 	if (CServer::ProtocolHasFeature(site.server.GetProtocol(), ProtocolFeature::PostLoginCommands)) {

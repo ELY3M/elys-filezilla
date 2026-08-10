@@ -34,6 +34,8 @@
 
 #include <assert.h>
 
+using namespace std::literals;
+
 using namespace ftpLogonStates;
 using namespace FtpRawTransferStates;
 
@@ -126,7 +128,7 @@ void CFtpControlSocket::ParseLine(std::wstring line)
 	if (!operations_.empty() && operations_.back()->opId == Command::connect) {
 		auto & data = static_cast<CFtpLogonOpData &>(*operations_.back());
 		if (data.challengeMode_) {
-			std::wstring& challenge = data.challenge;
+			std::wstring& challenge = data.challenge_;
 			if (!challenge.empty())
 #ifdef FZ_WINDOWS
 				challenge += L"\r\n";
@@ -332,6 +334,24 @@ void CFtpControlSocket::List(CServerPath const& path, std::wstring const& subDir
 	Push(std::make_unique<CFtpListOpData>(*this, path, subDir, flags));
 }
 
+int CFtpControlSocket::Disconnect()
+{
+	if (operations_.empty() && send_buffer_.empty() && active_layer_ && active_layer_->get_state() == fz::socket_state::connected) {
+		active_layer_->shutdown();
+	}
+
+	return CRealControlSocket::Disconnect();
+}
+
+int CFtpControlSocket::DoClose(int nErrorCode)
+{
+	// Also consider whether there is a data connnection before shutdown
+	if ((nErrorCode & FZ_REPLY_PASSWORDFAILED) && send_buffer_.empty() && active_layer_ && active_layer_->get_state() == fz::socket_state::connected) {
+		active_layer_->shutdown();
+	}
+	return CRealControlSocket::DoClose(nErrorCode);
+}
+
 int CFtpControlSocket::ResetOperation(int nErrorCode)
 {
  	log(logmsg::debug_verbose, L"CFtpControlSocket::ResetOperation(%d)", nErrorCode);
@@ -499,13 +519,27 @@ bool CFtpControlSocket::SetAsyncRequestReply(CAsyncRequestNotification *pNotific
 			}
 
 			CInteractiveLoginNotification *pInteractiveLoginNotification = static_cast<CInteractiveLoginNotification *>(pNotification);
-			if (!pInteractiveLoginNotification->passwordSet) {
+			if (!pInteractiveLoginNotification->responses_ || pInteractiveLoginNotification->responses_->size() != 1) {
 				ResetOperation(FZ_REPLY_CANCELED);
 				return false;
 			}
-			credentials_.SetPass(pInteractiveLoginNotification->credentials.GetPass());
-			credentials_.SetExtraParameters(currentServer_.GetProtocol(), pInteractiveLoginNotification->credentials.GetExtraParameters());
+			credentials_.SetPass(fz::to_wstring_from_utf8((*pInteractiveLoginNotification->responses_)[0]));
 
+			SendNextCommand();
+		}
+		break;
+	case reqId_otp:
+		{
+			if (operations_.empty() || operations_.back()->opId != Command::connect) {
+				log(logmsg::debug_info, L"No or invalid operation in progress, ignoring request reply %d", pNotification->GetRequestID());
+				return false;
+			}
+			OtpRequest& req = static_cast<OtpRequest&>(*pNotification);
+			if (req.otp_.empty()) {
+				ResetOperation(FZ_REPLY_CANCELED);
+				return false;
+			}
+			credentials_.SetExtraParameter(currentServer_.GetProtocol(), "otp_code"sv, fz::to_wstring_from_utf8(req.otp_));
 			SendNextCommand();
 		}
 		break;

@@ -57,6 +57,7 @@ static unsigned int register_interface_options()
 		{ "Show Tree Remote", true, option_flags::normal },
 		{ "File Pane Layout", 0, option_flags::normal, 0, 3 },
 		{ "File Pane Swap", false, option_flags::normal },
+	    { "Hide Local Pane", false, option_flags::normal },
 		{ "Filelist directory sort", 0, option_flags::normal, 0, 2 },
 		{ "Filelist name sort", DEFAULT_FILENAME_SORT, option_flags::normal, 0, 2 },
 		{ "Queue successful autoclear", false, option_flags::normal },
@@ -100,7 +101,6 @@ static unsigned int register_interface_options()
 		{ "Edit track local", true, option_flags::normal },
 		{ "Prevent idle sleep", true, option_flags::normal },
 		{ "Filteredit window size", L"", option_flags::normal },
-		{ "Enable invalid char filter", true, option_flags::normal },
 		{ "Invalid char replace", L"_", option_flags::normal, option_type::string, 1, [](std::wstring& v) {
 			return v.size() == 1 && !IsInvalidChar(v[0], true);
 		}},

@@ -183,10 +183,10 @@ void CContextControl::CreateContextControls(CState& state)
 
 		splitterPositions = currentControls.GetSplitterPositions();
 		if (currentControls.pLocalListView) {
-			currentControls.pLocalListView->SaveColumnSettings(OPTION_LOCALFILELIST_COLUMN_WIDTHS, OPTION_LOCALFILELIST_COLUMN_SHOWN, OPTION_LOCALFILELIST_COLUMN_ORDER);
+			currentControls.pLocalListView->SaveColumnSettings(m_mainFrame.GetOptions(), OPTION_LOCALFILELIST_COLUMN_WIDTHS, OPTION_LOCALFILELIST_COLUMN_SHOWN, OPTION_LOCALFILELIST_COLUMN_ORDER);
 		}
 		if (currentControls.pRemoteListView) {
-			currentControls.pRemoteListView->SaveColumnSettings(OPTION_REMOTEFILELIST_COLUMN_WIDTHS, OPTION_REMOTEFILELIST_COLUMN_SHOWN, OPTION_REMOTEFILELIST_COLUMN_ORDER);
+			currentControls.pRemoteListView->SaveColumnSettings(m_mainFrame.GetOptions(), OPTION_REMOTEFILELIST_COLUMN_WIDTHS, OPTION_REMOTEFILELIST_COLUMN_SHOWN, OPTION_REMOTEFILELIST_COLUMN_ORDER);
 		}
 
 		if (!m_tabs) {
@@ -238,15 +238,15 @@ void CContextControl::CreateContextControls(CState& state)
 
 	context_controls.pLocalTreeViewPanel = new CView(context_controls.pLocalSplitter);
 	context_controls.pLocalListViewPanel = new CView(context_controls.pLocalSplitter);
-	context_controls.pLocalTreeView = new CLocalTreeView(context_controls.pLocalTreeViewPanel, -1, state, m_mainFrame.GetQueue(), m_mainFrame.GetOptions());
-	context_controls.pLocalListView = new CLocalListView(context_controls.pLocalListViewPanel, state, m_mainFrame.GetQueue(), m_mainFrame.GetOptions(), m_mainFrame.GetEditHandler());
+	context_controls.pLocalTreeView = new CLocalTreeView(context_controls.pLocalTreeViewPanel, -1, state, m_mainFrame.GetQueue(), m_mainFrame.GetOptions(), m_mainFrame.GetLoginManager());
+	context_controls.pLocalListView = new CLocalListView(context_controls.pLocalListViewPanel, state, m_mainFrame.GetQueue(), m_mainFrame.GetOptions(), m_mainFrame.GetTimeFormatter(), m_mainFrame.GetLoginManager(), m_mainFrame.GetEditHandler());
 	context_controls.pLocalTreeViewPanel->SetWindow(context_controls.pLocalTreeView);
 	context_controls.pLocalListViewPanel->SetWindow(context_controls.pLocalListView);
 
 	context_controls.pRemoteTreeViewPanel = new CView(context_controls.pRemoteSplitter);
 	context_controls.pRemoteListViewPanel = new CView(context_controls.pRemoteSplitter);
-	context_controls.pRemoteTreeView = new CRemoteTreeView(context_controls.pRemoteTreeViewPanel, -1, state, m_mainFrame.GetQueue(), m_mainFrame.GetOptions());
-	context_controls.pRemoteListView = new CRemoteListView(context_controls.pRemoteListViewPanel, state, m_mainFrame.GetQueue(), m_mainFrame.GetOptions(), m_mainFrame.GetEditHandler());
+	context_controls.pRemoteTreeView = new CRemoteTreeView(context_controls.pRemoteTreeViewPanel, -1, state, m_mainFrame.GetQueue(), m_mainFrame.GetOptions(), m_mainFrame.GetLoginManager());
+	context_controls.pRemoteListView = new CRemoteListView(context_controls.pRemoteListViewPanel, state, m_mainFrame.GetQueue(), m_mainFrame.GetOptions(), m_mainFrame.GetTimeFormatter(), m_mainFrame.GetLoginManager(), m_mainFrame.GetEditHandler());
 	context_controls.pRemoteTreeViewPanel->SetWindow(context_controls.pRemoteTreeView);
 	context_controls.pRemoteListViewPanel->SetWindow(context_controls.pRemoteListView);
 
@@ -286,15 +286,6 @@ void CContextControl::CreateContextControls(CState& state)
 	const int layout = m_mainFrame.GetOptions().get_int(OPTION_FILEPANE_LAYOUT);
 	const int swap = m_mainFrame.GetOptions().get_int(OPTION_FILEPANE_SWAP);
 
-
-	
-	if (m_mainFrame.GetOptions().get_int(OPTION_LOCALPANE_HIDE)) {	
-		context_controls.pLocalTreeViewPanel->Hide();
-		context_controls.pLocalViewHeader->Hide();
-		context_controls.pLocalListViewPanel->Hide();
-		context_controls.pLocalSplitter->Hide();
-	}	
-		
 	if (layout == 1) {
 		if (swap) {
 			context_controls.pViewSplitter->SplitHorizontally(context_controls.pRemoteSplitter, context_controls.pLocalSplitter);
@@ -387,6 +378,17 @@ void CContextControl::CreateContextControls(CState& state)
 	else {
 		Initialize(context_controls.pViewSplitter);
 	}
+	
+	
+	if (m_mainFrame.GetOptions().get_int(OPTION_LOCALPANE_HIDE)) {
+	
+	context_controls.pLocalSplitter->Hide();
+	context_controls.pLocalSplitter->Unsplit();	
+	context_controls.pLocalTreeViewPanel->Hide();
+	context_controls.pLocalListViewPanel->Hide();
+
+	
+	}	
 
 	m_context_controls.push_back(context_controls);
 }
@@ -707,7 +709,7 @@ void CContextControl::SaveTabs()
 		Site const site = controls->pState->GetLastSite();
 
 		auto tab = tabs.append_child("Tab");
-		SetServer(tab, site);
+		SetServer(tab, site, m_mainFrame.GetLoginManager(), m_mainFrame.GetOptions());
 		tab.append_child("Site").text().set(fz::to_utf8(site.SitePath()).c_str());
 		tab.append_child("RemotePath").text().set(fz::to_utf8(controls->pState->GetLastServerPath().GetSafePath()).c_str());
 		tab.append_child("LocalPath").text().set(fz::to_utf8(controls->pState->GetLocalDir().GetPath()).c_str());

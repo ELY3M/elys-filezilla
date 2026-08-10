@@ -1,11 +1,10 @@
 #ifndef FILEZILLA_INTERFACE_SITEMANAGER_CONTROLS_HEADER
 #define FILEZILLA_INTERFACE_SITEMANAGER_CONTROLS_HEADER
 
-#include "serverdata.h"
-
 struct DialogLayout;
 class Site;
 enum class LogonType;
+class wxWindow;
 
 class SiteControls
 {
@@ -88,6 +87,7 @@ public:
 	virtual void SetControlVisibility(ServerProtocol protocol, LogonType) override;
 	virtual bool UpdateSite(Site & site, bool silent) override;
 
+private:
 	struct impl;
 	std::unique_ptr<impl> impl_;
 };
@@ -101,6 +101,21 @@ public:
 	virtual void SetSite(Site const& site, bool predefined) override;
 	virtual bool UpdateSite(Site & site, bool silent) override;
 
+	struct impl;
+	std::unique_ptr<impl> impl_;
+};
+
+class SftpSiteControls final : public SiteControls
+{
+public:
+	SftpSiteControls(wxWindow & parent, DialogLayout const& lay, wxFlexGridSizer & sizer);
+	~SftpSiteControls();
+
+	virtual void SetSite(Site const& site, bool predefined) override;
+	virtual void SetControlVisibility(ServerProtocol protocol, LogonType) override;
+	virtual bool UpdateSite(Site & site, bool silent) override;
+
+private:
 	struct impl;
 	std::unique_ptr<impl> impl_;
 };
