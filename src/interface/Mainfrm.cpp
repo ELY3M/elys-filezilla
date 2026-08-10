@@ -1888,6 +1888,7 @@ void CMainFrame::UpdateLayout()
 {
 	int const layout = options_.get_int(OPTION_FILEPANE_LAYOUT);
 	int const swap = options_.get_int(OPTION_FILEPANE_SWAP);
+	int const localpanehide = options_.get_int(OPTION_LOCALPANE_HIDE);
 
 	int const messagelog_position = options_.get_int(OPTION_MESSAGELOG_POSITION);
 
@@ -2063,7 +2064,16 @@ void CMainFrame::UpdateLayout()
 			controls->pLocalSplitter->SetSashGravity(0.0);
 			controls->pRemoteSplitter->SetSashGravity(0.0);
 		}
+
+	if (localpanehide) {
+	controls->pLocalSplitter->Hide();
+	controls->pLocalSplitter->Unsplit();	
+	controls->pLocalTreeViewPanel->Hide();
+	controls->pLocalListViewPanel->Hide();	
 	}
+	
+	}
+			
 }
 
 void CMainFrame::OnSitemanagerDropdown(wxCommandEvent& event)
@@ -2961,7 +2971,7 @@ void CMainFrame::SetupKeyboardAccelerators()
 
 void CMainFrame::OnOptionsChanged(watched_options const& options)
 {
-	if (options.test(OPTION_FILEPANE_LAYOUT) || options.test(OPTION_FILEPANE_SWAP) || options.test(OPTION_MESSAGELOG_POSITION)) {
+	if (options.test(OPTION_FILEPANE_LAYOUT) || options.test(OPTION_FILEPANE_SWAP) || options.test(OPTION_LOCALPANE_HIDE) || options.test(OPTION_MESSAGELOG_POSITION)) {
 		UpdateLayout();
 	}
 
