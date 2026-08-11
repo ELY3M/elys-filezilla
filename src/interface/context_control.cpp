@@ -225,12 +225,20 @@ void CContextControl::CreateContextControls(CState& state)
 
 	context_controls.pViewSplitter = new CSplitterWindowEx(parent, -1, initial_position, paneSizes[0], wxSP_NOBORDER  | wxSP_LIVE_UPDATE);
 	context_controls.pViewSplitter->SetMinSize(wxDefaultSize);
+
+	if (m_mainFrame.GetOptions().get_int(OPTION_LOCALPANE_HIDE)) {
+	context_controls.pViewSplitter->SetMinimumPaneSize(0, 0);  //elys-mod //was 50,100
+	context_controls.pViewSplitter->SetSashGravity(0.5); //testing //elys-mod //was 0.5
+	} else {
 	context_controls.pViewSplitter->SetMinimumPaneSize(50, 100);
 	context_controls.pViewSplitter->SetSashGravity(0.5);
-
+	}
+	
 	context_controls.pLocalSplitter = new CSplitterWindowEx(context_controls.pViewSplitter, -1, wxDefaultPosition, paneSizes[1], wxSP_NOBORDER  | wxSP_LIVE_UPDATE);
+	if (!m_mainFrame.GetOptions().get_int(OPTION_LOCALPANE_HIDE)) {
 	context_controls.pLocalSplitter->SetMinSize(wxDefaultSize);
 	context_controls.pLocalSplitter->SetMinimumPaneSize(50, 100);
+	}
 
 	context_controls.pRemoteSplitter = new CSplitterWindowEx(context_controls.pViewSplitter, -1, wxDefaultPosition, paneSizes[2], wxSP_NOBORDER  | wxSP_LIVE_UPDATE);
 	context_controls.pRemoteSplitter->SetMinSize(wxDefaultSize);

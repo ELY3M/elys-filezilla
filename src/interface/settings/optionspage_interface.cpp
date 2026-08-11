@@ -125,7 +125,6 @@ bool COptionsPageInterface::LoadPage()
 	impl_->messagelog_pos_->SetSelection(m_pOptions->get_int(OPTION_MESSAGELOG_POSITION));
 	impl_->swap_->SetValue(m_pOptions->get_bool(OPTION_FILEPANE_SWAP));
 	impl_->hidelocalpane_->SetValue(m_pOptions->get_bool(OPTION_LOCALPANE_HIDE));
-	
 #ifndef __WXMAC__
 	impl_->minimize_tray_->SetValue(m_pOptions->get_bool(OPTION_MINIMIZE_TRAY));
 #endif
@@ -134,7 +133,7 @@ bool COptionsPageInterface::LoadPage()
 	}
 
 	impl_->momentary_speed_->SetValue(m_pOptions->get_bool(OPTION_SPEED_DISPLAY));
-	
+
 	int const startupAction = m_pOptions->get_int(OPTION_STARTUP_ACTION);
 	switch (startupAction) {
 	default:
