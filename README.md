@@ -5,9 +5,11 @@ I added hiding local pane in the setting and ability to hide local pane.
 I know it is more of a code hack.        
 you need to restart after and move the old blank pane to left after you checked the hide local pane in the settings.    
    
+on windows
+![FileZilla Client on windows](https://github.com/ELY3M/elys-filezilla/blob/master/screenshot.png)
 
-![FileZilla Client](https://github.com/ELY3M/elys-filezilla/blob/master/screenshot.png)
-
+on ubuntu
+![FileZilla Client on ubuntu](https://github.com/ELY3M/elys-filezilla/blob/master/screenshot-linux.png)
 
 =======================================================   
 
