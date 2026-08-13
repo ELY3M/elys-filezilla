@@ -10,7 +10,7 @@ added darkmode support for windows.  Thank you to this fork from Pharaoh2k at ht
 you must use wxWidgets 3.3.1 and use the patch to patch wxwidget source.      
  
 on windows
-![FileZilla Client on windows](https://github.com/ELY3M/elys-filezilla/blob/master/screenshot.png)
+![FileZilla Client on windows](https://github.com/ELY3M/elys-filezilla/blob/master/screenshot-windows.png)
 
 on ubuntu
 ![FileZilla Client on ubuntu](https://github.com/ELY3M/elys-filezilla/blob/master/screenshot-linux.png)
