@@ -3,8 +3,12 @@
 I hate that local pane.  I wanted only single pane like winscp.   
 I added hiding local pane in the setting and ability to hide local pane.
 I know it is more of a code hack.        
-you need to restart after and move the old blank pane to left after you checked the hide local pane in the settings.    
-   
+you need to restart after and move the old blank pane to left after you checked the hide local pane in the settings.   
+
+added darkmode support for windows.  Thank you to this fork from Pharaoh2k at https://github.com/Pharaoh2k/FileZilla-Themed-For-Windows  
+
+you must use wxWidgets 3.3.1 and use the patch to patch wxwidget source.      
+ 
 on windows
 ![FileZilla Client on windows](https://github.com/ELY3M/elys-filezilla/blob/master/screenshot.png)
 
