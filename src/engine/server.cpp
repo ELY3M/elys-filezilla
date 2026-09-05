@@ -572,6 +572,7 @@ bool CServer::ProtocolHasFeature(ServerProtocol const protocol, ProtocolFeature 
 			return true;
 		}
 		break;
+	case ProtocolFeature::HomeDirectory:
 	case ProtocolFeature::Charset:
 		if (protocol == FTP || protocol == FTPS || protocol == FTPES || protocol == INSECURE_FTP ||
 			protocol == SFTP) {
@@ -680,7 +681,7 @@ std::wstring CServer::GetNameFromServerType(ServerType type)
 
 ServerType CServer::GetServerTypeFromName(std::wstring const& name)
 {
-	for (int i = 0; i < SERVERTYPE_MAX; ++i) {
+	for (unsigned int i = 0; i < SERVERTYPE_MAX; ++i) {
 		ServerType type = static_cast<ServerType>(i);
 		if (name == CServer::GetNameFromServerType(type)) {
 			return type;

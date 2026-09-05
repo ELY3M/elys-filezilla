@@ -7,7 +7,7 @@ you need to restart after and move the old blank pane to left after you checked 
 
 added darkmode support for windows.  Thank you to this fork from Pharaoh2k at https://github.com/Pharaoh2k/FileZilla-Themed-For-Windows  
 
-you must use wxWidgets 3.3.1 and use the patch to patch wxwidget source.      
+you must use wxWidgets 3.3.3 and use the patch to patch wxwidget source.      
  
 on windows
 ![FileZilla Client on windows](https://github.com/ELY3M/elys-filezilla/blob/master/screenshot-windows.png)

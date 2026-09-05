@@ -29,6 +29,10 @@
 #include <shobjidl.h>
 #endif
 
+#if USE_UILOCALE
+#include <wx/uilocale.h>
+#endif
+
 #include "locale_initializer.h"
 
 #ifdef USE_MAC_SANDBOX
@@ -56,70 +60,6 @@ CFileZillaApp::CFileZillaApp()
 CFileZillaApp::~CFileZillaApp()
 {
 	themeProvider_.reset();
-}
-
-void CFileZillaApp::InitLocale()
-{
-	AddStartupProfileRecord("CFileZillaApp::InitLocale()"sv);
-	wxString language = options_->get_string(OPTION_LANGUAGE);
-	const wxLanguageInfo* pInfo = wxLocale::FindLanguageInfo(language);
-	if (!language.empty()) {
-#ifdef __WXGTK__
-		if (CInitializer::error) {
-			wxString error;
-
-			wxLocale *loc = wxGetLocale();
-			const wxLanguageInfo* currentInfo = loc ? loc->GetLanguageInfo(loc->GetLanguage()) : 0;
-			if (!loc || !currentInfo) {
-				if (!pInfo) {
-					error.Printf(_("Failed to set language to %s, using default system language."),
-						language);
-				}
-				else {
-					error.Printf(_("Failed to set language to %s (%s), using default system language."),
-						pInfo->Description, language);
-				}
-			}
-			else {
-				wxString currentName = currentInfo->CanonicalName;
-
-				if (!pInfo) {
-					error.Printf(_("Failed to set language to %s, using default system language (%s, %s)."),
-						language, loc->GetLocale(),
-						currentName);
-				}
-				else {
-					error.Printf(_("Failed to set language to %s (%s), using default system language (%s, %s)."),
-						pInfo->Description, language, loc->GetLocale(),
-						currentName);
-				}
-			}
-
-			error += _T("\n");
-			error += _("Please make sure the requested locale is installed on your system.");
-			wxMessageBoxEx(error, _("Failed to change language"), wxICON_EXCLAMATION);
-
-			options_->set(OPTION_LANGUAGE, _T(""));
-		}
-#else
-		if (!pInfo || !SetLocale(pInfo->Language)) {
-			for (language = GetFallbackLocale(language); !language.empty(); language = GetFallbackLocale(language)) {
-				const wxLanguageInfo* fallbackInfo = wxLocale::FindLanguageInfo(language);
-				if (fallbackInfo && SetLocale(fallbackInfo->Language)) {
-					options_->set(OPTION_LANGUAGE, language.ToStdWstring());
-					return;
-				}
-			}
-			options_->set(OPTION_LANGUAGE, std::wstring());
-			if (pInfo && !pInfo->Description.empty()) {
-				wxMessageBoxEx(wxString::Format(_("Failed to set language to %s (%s), using default system language"), pInfo->Description, language), _("Failed to change language"), wxICON_EXCLAMATION);
-			}
-			else {
-				wxMessageBoxEx(wxString::Format(_("Failed to set language to %s, using default system language"), language), _("Failed to change language"), wxICON_EXCLAMATION);
-			}
-		}
-#endif
-	}
 }
 
 namespace {
@@ -157,6 +97,18 @@ void CFileZillaApp::ApplyAppearanceMode()
 		MSWEnableDarkMode();
 		break;
 	}
+
+	// OnInit() disables wxWidgets' own painting of wxStaticBox (see the
+	// "msw.staticbox.optimized-paint" option there), leaving it to the native
+	// group box control. That control has no dark theme and paints its label
+	// black. Up to wxWidgets 3.3.2 dark mode gave static boxes an explicit
+	// foreground colour, which switched them back to custom painting anyway;
+	// 3.3.3 no longer does that, so the labels became unreadable. Re-enable
+	// the option whenever dark mode is active so wxWidgets paints the labels in
+	// the dark-mode text colour.
+	if (wxSystemSettings::GetAppearance().IsDark()) {
+		wxSystemOptions::SetOption(_T("msw.staticbox.optimized-paint"), 1);
+	}
 }
 #endif
 
@@ -186,7 +138,9 @@ bool CFileZillaApp::OnInit()
 	wxSystemOptions::SetOption(_T("msw.window.no-clip-children"), 0);
 	wxSystemOptions::SetOption(_T("msw.font.no-proof-quality"), 0);
 	wxSystemOptions::SetOption(_T("msw.remap"), 0);
-	wxSystemOptions::SetOption(_T("msw.staticbox.optimized-paint"), 0);
+	// Note: 0 disables wxWidgets' own static box painting; ApplyAppearanceMode()
+	// re-enables it in dark mode, where the native painting is unreadable.
+	wxSystemOptions::SetOption(_T("msw.staticbox.optimized-paint"), 0);	
 #endif
 #ifdef __WXMAC__
 	wxSystemOptions::SetOption(_T("mac.listctrl.always_use_generic"), 1);
@@ -255,7 +209,7 @@ USE AT OWN RISK"), _T("Important Information"));
 
 	// Load the text wrapping engine
 	m_pWrapEngine = std::make_unique<CWrapEngine>();
-	m_pWrapEngine->LoadCache();
+	m_pWrapEngine->LoadCache(*options_);
 
 	bool welcome_skip = false;
 #ifdef USE_MAC_SANDBOX
@@ -333,7 +287,138 @@ bool CFileZillaApp::LoadResourceFiles()
 	return true;
 }
 
-bool CFileZillaApp::LoadLocales()
+#if USE_UILOCALE
+namespace {
+std::wstring GetTranslationName(wxLocaleIdent const& lid)
+{
+	std::wstring ret = lid.GetLanguage().ToStdWstring();
+	std::wstring region = lid.GetRegion().ToStdWstring();
+	if (!ret.empty() && !region.empty()) {
+		ret += '_';
+		ret += region;
+		std::wstring modifier = lid.GetModifier().ToStdWstring();
+		if (!modifier.empty()) {
+			ret += '@';
+			ret += modifier;
+		}
+	}
+	return ret;
+}
+}
+
+void CFileZillaApp::LoadLocales()
+{
+	setlocale(LC_COLLATE, "");
+	wxUILocale::UseDefault();
+
+	AddStartupProfileRecord("CFileZillaApp::LoadLocales"sv);
+	m_localesDir = GetFZDataDir({L"locales/de/filezilla.mo"}, std::wstring());
+	if (!m_localesDir.empty()) {
+		m_localesDir.AddSegment(_T("locales"));
+	}
+#ifndef __WXMAC__
+	else {
+		m_localesDir = GetFZDataDir({L"de/filezilla.mo", L"de/LC_MESSAGES/filezilla.mo"}, L"share/locale", false);
+	}
+#endif
+	if (!m_localesDir.empty()) {
+		wxFileTranslationsLoader::AddCatalogLookupPathPrefix(m_localesDir.GetPath());
+	}
+
+	SetLocale(GetTranslationName(wxUILocale::GetCurrent().GetLocaleId()), nullptr);
+}
+
+bool CFileZillaApp::SetLocale(std::wstring language, wxLanguageInfo const** outInfo)
+{
+	if (language.empty() || language == L"en"sv || language == L"en_US"sv) {
+		wxTranslations::Set(nullptr);
+		lang_ = wxLANGUAGE_ENGLISH;
+		lang_code_ = L"en_US"sv;
+		layout_direction_ = wxLayout_LeftToRight;
+		return true;
+	}
+
+	wxTranslations* ts = new wxTranslations;
+	wxArrayString languages = ts->GetAvailableTranslations(L"filezilla");
+
+	if (languages.Index(language) == wxNOT_FOUND) {
+		size_t pos = language.find('_');
+		if (pos != std::wstring::npos) {
+			language = language.substr(0, pos);
+			if (languages.Index(language) == wxNOT_FOUND) {
+				language.clear();
+			}
+		}
+	}
+
+	wxLanguageInfo const* info = language.empty() ? nullptr : wxUILocale::FindLanguageInfo(language);
+	if (outInfo) {
+		*outInfo = info;
+	}
+	if (!language.empty() && info) {
+		lang_code_ = language;
+		lang_ = info->Language;
+		layout_direction_ = info->LayoutDirection;
+		ts->SetLanguage(language);
+		ts->AddCatalog(L"filezilla");
+		ts->AddCatalog(L"libfilezilla");
+		wxTranslations::Set(ts);
+		return true;
+	}
+	else {
+		lang_ = wxLANGUAGE_ENGLISH;
+		lang_code_ = L"en_US"sv;
+		layout_direction_ = wxLayout_LeftToRight;
+
+		delete ts;
+		wxTranslations::Set(nullptr);
+		return false;
+	}
+}
+
+void CFileZillaApp::InitLocale()
+{
+	AddStartupProfileRecord("CFileZillaApp::InitLocale()"sv);
+	std::wstring const language = options_->get_string(OPTION_LANGUAGE);
+	if (!language.empty()) {
+		wxLanguageInfo const* info{};
+		if (SetLocale(language, &info)) {
+			if (lang_code_ != language) {
+				options_->set(OPTION_LANGUAGE, lang_code_);
+			}
+		}
+		else {
+			options_->set(OPTION_LANGUAGE, std::wstring());
+
+			SetLocale(GetTranslationName(wxUILocale::GetCurrent().GetLocaleId()), nullptr);
+
+			if (info && !info->Description.empty()) {
+				wxMessageBoxEx(wxString::Format(_("Failed to set language to %s (%s), using default system language"), info->Description, language), _("Failed to change language"), wxICON_EXCLAMATION);
+			}
+			else {
+				wxMessageBoxEx(wxString::Format(_("Failed to set language to %s, using default system language"), language), _("Failed to change language"), wxICON_EXCLAMATION);
+			}
+		}
+	}
+}
+
+int CFileZillaApp::GetCurrentLanguage() const
+{
+	return lang_;
+}
+
+wxString CFileZillaApp::GetCurrentLanguageCode() const
+{
+	return lang_code_;
+}
+
+wxLayoutDirection CFileZillaApp::GetLayoutDirection() const
+{
+	return layout_direction_;
+}
+
+#else
+void CFileZillaApp::LoadLocales()
 {
 	AddStartupProfileRecord("CFileZillaApp::LoadLocales"sv);
 	m_localesDir = GetFZDataDir({L"locales/de/filezilla.mo"}, std::wstring());
@@ -350,8 +435,6 @@ bool CFileZillaApp::LoadLocales()
 	}
 
 	SetLocale(wxLANGUAGE_DEFAULT);
-
-	return true;
 }
 
 bool CFileZillaApp::SetLocale(int language)
@@ -392,6 +475,70 @@ bool CFileZillaApp::SetLocale(int language)
 	return true;
 }
 
+void CFileZillaApp::InitLocale()
+{
+	AddStartupProfileRecord("CFileZillaApp::InitLocale()"sv);
+	wxString language = options_->get_string(OPTION_LANGUAGE);
+	const wxLanguageInfo* pInfo = wxLocale::FindLanguageInfo(language);
+	if (!language.empty()) {
+#ifdef __WXGTK__
+		if (CInitializer::error) {
+			wxString error;
+
+			wxLocale *loc = wxGetLocale();
+			const wxLanguageInfo* currentInfo = loc ? loc->GetLanguageInfo(loc->GetLanguage()) : 0;
+			if (!loc || !currentInfo) {
+				if (!pInfo) {
+					error.Printf(_("Failed to set language to %s, using default system language."),
+						language);
+				}
+				else {
+					error.Printf(_("Failed to set language to %s (%s), using default system language."),
+						pInfo->Description, language);
+				}
+			}
+			else {
+				wxString currentName = currentInfo->CanonicalName;
+
+				if (!pInfo) {
+					error.Printf(_("Failed to set language to %s, using default system language (%s, %s)."),
+						language, loc->GetLocale(),
+						currentName);
+				}
+				else {
+					error.Printf(_("Failed to set language to %s (%s), using default system language (%s, %s)."),
+						pInfo->Description, language, loc->GetLocale(),
+						currentName);
+				}
+			}
+
+			error += _T("\n");
+			error += _("Please make sure the requested locale is installed on your system.");
+			wxMessageBoxEx(error, _("Failed to change language"), wxICON_EXCLAMATION);
+
+			options_->set(OPTION_LANGUAGE, _T(""));
+		}
+#else
+		if (!pInfo || !SetLocale(pInfo->Language)) {
+			for (language = GetFallbackLocale(language); !language.empty(); language = GetFallbackLocale(language)) {
+				const wxLanguageInfo* fallbackInfo = wxLocale::FindLanguageInfo(language);
+				if (fallbackInfo && SetLocale(fallbackInfo->Language)) {
+					options_->set(OPTION_LANGUAGE, language.ToStdWstring());
+					return;
+				}
+			}
+			options_->set(OPTION_LANGUAGE, std::wstring());
+			if (pInfo && !pInfo->Description.empty()) {
+				wxMessageBoxEx(wxString::Format(_("Failed to set language to %s (%s), using default system language"), pInfo->Description, language), _("Failed to change language"), wxICON_EXCLAMATION);
+			}
+			else {
+				wxMessageBoxEx(wxString::Format(_("Failed to set language to %s, using default system language"), language), _("Failed to change language"), wxICON_EXCLAMATION);
+			}
+		}
+#endif
+	}
+}
+
 int CFileZillaApp::GetCurrentLanguage() const
 {
 	if (!m_pLocale) {
@@ -409,6 +556,7 @@ wxString CFileZillaApp::GetCurrentLanguageCode() const
 
 	return m_pLocale->GetCanonicalName();
 }
+#endif
 
 #if wxUSE_DEBUGREPORT && wxUSE_ON_FATAL_EXCEPTION
 void CFileZillaApp::OnFatalException()

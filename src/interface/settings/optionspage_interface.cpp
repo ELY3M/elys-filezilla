@@ -30,6 +30,7 @@ struct COptionsPageInterface::impl
 
 	wxCheckBox* momentary_speed_{};
 	wxCheckBox* ropListRefresh_{};
+	wxCheckBox* disableDnd_{};
 };
 
 COptionsPageInterface::COptionsPageInterface()
@@ -51,6 +52,7 @@ bool COptionsPageInterface::CreateControls(wxWindow* parent)
 
 	{
 		auto [box, inner] = lay.createStatBox(main, _("Appearance"), 1);
+
 		auto rows = lay.createFlex(2);
 		inner->Add(rows);
 		rows->Add(new wxStaticText(box, nullID, _("&Color theme:")), lay.valign);
@@ -122,6 +124,9 @@ bool COptionsPageInterface::CreateControls(wxWindow* parent)
 		inner->AddSpacer(0);
 		impl_->ropListRefresh_ = new wxCheckBox(box, nullID, _("&Force refresh of directory listings during remote recursive operations"));
 		inner->Add(impl_->ropListRefresh_);
+
+		impl_->disableDnd_ = new wxCheckBox(box, nullID, _("D&isable drag and drop of files and directories"));
+		inner->Add(impl_->disableDnd_);
 	}
 
 	{
@@ -177,6 +182,7 @@ bool COptionsPageInterface::LoadPage()
 	m_pOwner->RememberOldValue(OPTION_LOCALPANE_HIDE);
 
 	impl_->ropListRefresh_->SetValue(m_pOptions->get_bool(OPTION_REMOTE_ROP_LISTING_REFRESH));
+	impl_->disableDnd_->SetValue(m_pOptions->get_bool(OPTION_DND_DISABLED));
 
 	return true;
 }
@@ -225,6 +231,7 @@ bool COptionsPageInterface::SavePage()
 	}
 	m_pOptions->set(OPTION_ALREADYCONNECTED_CHOICE, action);
 	m_pOptions->set(OPTION_REMOTE_ROP_LISTING_REFRESH, impl_->ropListRefresh_->GetValue());
+	m_pOptions->set(OPTION_DND_DISABLED, impl_->disableDnd_->GetValue());
 
 	return true;
 }
